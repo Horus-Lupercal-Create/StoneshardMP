@@ -134,5 +134,22 @@ internal static class ContractData
     }
 
     // GameMaker's "== true": a true, or the number 1.
+    /// <summary>Whether the contract at a list's index is taken here (false if there's none).</summary>
+    public static bool Taken(int list, int index)
+        => List(list) is { } contracts && index >= 0 && index < contracts.Count && contracts.GetMap(index) is { } contract
+            && IsTrue(contract["isTaken"]);
+
+    /// <summary>Whether a contract's JSON says it's taken.</summary>
+    public static bool TakenIn(string json)
+    {
+        try
+        {
+            return System.Text.Json.Nodes.JsonNode.Parse(json)?["isTaken"] is { } taken
+                && (taken.GetValueKind() == System.Text.Json.JsonValueKind.True
+                    || taken.GetValueKind() == System.Text.Json.JsonValueKind.Number && taken.GetValue<double>() == 1);
+        }
+        catch (System.Text.Json.JsonException) { return false; }
+    }
+
     private static bool IsTrue(GmValue value) => value.Kind is GmKind.Bool or GmKind.Real && value.AsReal == 1;
 }

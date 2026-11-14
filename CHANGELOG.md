@@ -26,6 +26,10 @@ releases them: the release workflow titles that section with the version, sets i
   failed to take the host's caravan state ("Packet receive failed", an SEHException in `DsMap.AssignFrom`), which left
   its caravan behind the host's. It's now taken a part at a time: a part that fails is logged by name ("Caravan data:
   … couldn't be taken") and skipped, and everything else still arrives.
+- **Fixed: contract offers went missing from village boards** (#76): two instead of three, and none after a night.
+  Each game's day runs the offers down and gives some away at random, and a client's day did that its own way and sent
+  the result to the host. Now only the host's day does: a client deletes no offers itself, and the host ignores a
+  client's change to an offer nobody has taken.
 
 ## 0.5.2
 

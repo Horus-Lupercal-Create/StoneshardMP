@@ -11,6 +11,7 @@ using StoneshardMP.Net.Packets;
 // The game scripts contracts are made and counted through (the patcher makes them hookable).
 [assembly: HookScript(nameof(Scripts.scr_contract_add))]
 [assembly: HookScript(nameof(Scripts.scr_globaltile_set))]
+[assembly: HookScript(nameof(Scripts.scr_contract_delete))]
 
 namespace StoneshardMP.Features.Contracts;
 
@@ -28,6 +29,11 @@ namespace StoneshardMP.Features.Contracts;
 //   don't; a failure reaches them with the contract.
 // - A village's contract counts (out, completed) are shared calls (QuestSync), and a dungeon's contract values come
 //   with the dungeon (WorldSync): a contract's index is the same in every game.
+// - The offers on a village's board are the host's too. Every game's day (o_time_controller's user event 6) runs their
+//   expiry down and, at random, gives an offer away to someone else (deleted): a client's day did it its own way and
+//   sent the result, so the host's board lost offers to a client's dice, and its count with them (#76: two offers, and
+//   none after a night). A client's day deletes none (they go when the host's do), and the host doesn't take a
+//   client's change to an offer neither of them has taken.
 public sealed class ContractSync
 {
     // (Twice a second.)
@@ -40,6 +46,8 @@ public sealed class ContractSync
     // What each contract ("list:index") was when last sent or taken.
     private readonly Dictionary<string, string> _sent = new();
     private bool _wasSharing, _wasInWorld;
+    // Inside the game's daily contract upkeep (o_time_controller's user event 6).
+    private int _day;
     private int _frame;
 
     public ContractSync(ModContext context, Session session, JoinManager join, QuestSync quests)
@@ -56,6 +64,12 @@ public sealed class ContractSync
             call.Result = call.Args.Length > 0 ? call.Args[0] : GmValue.Undefined;
             return true;
         });
+        // The day's upkeep: a client deletes no offers of its own.
+        context.OnCode("gml_Object_o_time_controller_Other_16",
+            before: (_, _) => { _day++; return false; },
+            after: (_, _) => _day = Math.Max(0, _day - 1));
+        Scripts.scr_contract_delete.Before(context, call =>
+            _day > 0 && _session.Mode == Session.SessionMode.Client && _join.ClientInWorld);
         // The hourly deadline count: the host's alone while playing together.
         context.OnCode("gml_Object_o_time_controller_Other_13", before: (_, _) => ClockHour());
         // A village's contract counts (scr_globaltile_set: key, value, x, y, layer): the tile is filled in where the
@@ -168,7 +182,12 @@ public sealed class ContractSync
         // (A client's full copy is the host's alone.)
         if (packet.Kind == ContractKind.Full && (_session.Mode != Session.SessionMode.Client || sender.Slot != 0))
             return;
-        string now = ContractData.Apply(packet.List, packet.Index, JoinCompression.Decompress(packet.Data),
+        string json = JoinCompression.Decompress(packet.Data);
+        // (An offer on a board neither of us has taken: the host's to change.)
+        if (_session.Mode == Session.SessionMode.Host && packet.List == 1 && !ContractData.Taken(1, packet.Index)
+            && !ContractData.TakenIn(json))
+            return;
+        string now = ContractData.Apply(packet.List, packet.Index, json,
             packet.Kind == ContractKind.Full, _session.Mode == Session.SessionMode.Host);
         // What we have now counts as sent: not sent back.
         if (now.Length > 0)
