@@ -14,6 +14,10 @@ releases them: the release workflow titles that section with the version, sets i
   300 a second, enough for a full inventory.
 - **Fixed: a crash picking up an arrow** ("Data structure with index does not exist", in `scr_inv_atr`, #72). An item on
   the ground whose item data was gone is now removed when a pickup reaches it instead of stopping the game, and logged.
+- **Fixed: turn-based rounds stopped while an animal was still fighting a client** (#70). A boar or bear going for a
+  client counts as fighting that client's stand-in in the area owner's game, which the game only counts as combat near
+  the owner's own character, so the rounds ended after the first turn. The owner now counts any unit going for a
+  player's stand-in as that player being in combat.
 
 ## 0.5.2
 

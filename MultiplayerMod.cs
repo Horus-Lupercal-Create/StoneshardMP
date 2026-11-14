@@ -118,7 +118,7 @@ public sealed class MultiplayerMod : IStoneMod, ITickable
         // turn the clients' clocks (a place's owner moving its units, streamed to its followers by AreaUnits).
         // Shared turn-based rounds where players are together and anyone needs turns (in combat, bleeding out, on fire),
         // with their turn order shown on the HUD.
-        _rounds = new TurnRounds(context, _session, _ownership, () => _join.InSharedWorld);
+        _rounds = new TurnRounds(context, _session, _ownership, () => _join.InSharedWorld, slot => _players.UnitOf(slot));
         context.UI.Hud.Add(new TurnOrder(_rounds, _session, () => _players.ObjectIndex));
         _clock = new WorldClock(context, _session, _ownership, () => _join.InSharedWorld, _ => _rounds.Active);
         // A move's time shared out: 30 seconds over the number of players in the world (a round's turn keeps its 30).

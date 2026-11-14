@@ -34,6 +34,8 @@ public sealed class TurnRounds
     private readonly Session _session;
     private readonly AreaOwnership _ownership;
     private readonly Func<bool> _inSharedWorld;
+    // A player's stand-in in our game (none if they've none here).
+    private readonly Func<int, Instance> _standIn;
 
     // Everyone: our reason (read every few frames), the last round we acted in, the game's turn count last seen.
     private TurnReason _reason;
@@ -52,13 +54,17 @@ public sealed class TurnRounds
     private int _actedCount;
     private bool _enemiesTurn;
     private string _sent = "";
+    // Owner: the followers our units are fighting (by slot), looked at every few frames.
+    private readonly HashSet<int> _fought = new();
 
-    public TurnRounds(ModContext context, Session session, AreaOwnership ownership, Func<bool> inSharedWorld)
+    public TurnRounds(ModContext context, Session session, AreaOwnership ownership, Func<bool> inSharedWorld,
+        Func<int, Instance> standIn)
     {
         _context = context;
         _session = session;
         _ownership = ownership;
         _inSharedWorld = inSharedWorld;
+        _standIn = standIn;
         ownership.Changed += (_, _) => Restart();
         Scripts.scr_unitTurnGetTime.After(context, call =>
         {
@@ -126,6 +132,7 @@ public sealed class TurnRounds
         _actingSince = -1;
         _status.Clear();
         _skipped.Clear();
+        _fought.Clear();
         _enemiesTurn = false;
         _sent = "";
     }
@@ -155,7 +162,11 @@ public sealed class TurnRounds
             return;
         }
         if (++_frame % 10 == 0)
+        {
             _reason = TurnReasons.Ours();
+            if (_ownership.Role == AreaRole.Owner)
+                FindFought();
+        }
         // (An action on our turn - the game counted a turn: we've acted this round.)
         int turns = GameClock.Turns();
         if (turns != _turns)
@@ -244,7 +255,8 @@ public sealed class TurnRounds
         var here = _ownership.Others.ToList();
         foreach (int gone in _status.Keys.Where(slot => !_session.Players.Any(p => p.Slot == slot)).ToList())
             _status.Remove(gone);
-        TurnReason ReasonOf(int slot) => slot == _session.Slot ? _reason : _status.GetValueOrDefault(slot).Reason;
+        TurnReason ReasonOf(int slot) => slot == _session.Slot ? _reason
+            : _status.GetValueOrDefault(slot).Reason is var told && told == TurnReason.None && _fought.Contains(slot) ? TurnReason.Combat : told;
         var slots = here.Prepend(_session.Slot).OrderBy(s => s).ToList();
         bool active = slots.Count >= 2 && slots.Any(s => ReasonOf(s) != TurnReason.None);
         if (!active)
@@ -294,6 +306,30 @@ public sealed class TurnRounds
             // (Their turn's over - everything it set off has finished: the next round.)
             NewRound(now);
         Broadcast(now);
+    }
+
+    // Owner: the followers one of our units is fighting - its target their stand-in. Their game can't tell: its units are
+    // our copies, their AI off. And ours only counts what's after our own player (the game's count): an animal (a boar, a
+    // bear) fighting a follower is in "npc combat" with their stand-in, which the game counts only near our player - the
+    // rounds ended after its first turn while it went on attacking them (#70).
+    private void FindFought()
+    {
+        _fought.Clear();
+        var standIns = new Dictionary<Instance, int>();
+        foreach (int slot in _ownership.Others)
+            if (_standIn(slot) is { IsNone: false } unit && unit.Exists)
+                standIns[unit.Persist()] = slot;
+        if (standIns.Count == 0)
+            return;
+        foreach (Instance unit in Instances.All(GameObjectId.o_enemy))
+        {
+            if (!unit.Exists || unit.Get("state") is not { Kind: GmKind.String } state
+                || state.AsString is not ("attack" or "threat" or "npc combat"))
+                continue;
+            if (Instance.Of(unit.Get("target")) is { IsNone: false } target && target.Exists
+                && standIns.TryGetValue(target.Persist(), out int fought))
+                _fought.Add(fought);
+        }
     }
 
     private void NewRound(long now)
