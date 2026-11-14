@@ -30,14 +30,14 @@ public sealed class LootSync
     // (Every this many frames - often, so a throw is caught early in its arc; a follower asks again for a snapshot
     // after this many checks without one; the first milliseconds after one, loot still turning up is the area loading;
     // a drop window after the "dropped" line; a follower's drop the owner hasn't brought back by then is removed; at
-    // most this many of a follower's drops a second - against a runaway loop; loot this close to where we dropped it
-    // is ours.)
+    // most this many of a follower's drops a second - against a runaway loop, not a death: a whole inventory falls at
+    // once, and at 10 most of a dead client's things were lost, #74; loot this close to where we dropped it is ours.)
     private const int Interval = 4;
     private const int SnapshotWait = 15;
     private const long SettleMs = 3000;
     private const long DropWindowMs = 1500;
     private const long DropPendingMs = 5000;
-    private const int DropsPerSecond = 10;
+    private const int DropsPerSecond = 300;
     private const double DropReach = 80;
 
     // A follower's flags on loot: came from the other game (never a drop of ours), a drop or not is decided, it is our
@@ -126,6 +126,35 @@ public sealed class LootSync
                 _shots.Add((corpse.Get("x").AsReal, corpse.Get("y").AsReal, Environment.TickCount64 + DropWindowMs));
             return false;
         });
+        // Picking loot up (o_floor_target's user event 0) copies each item's data map into the inventory's item: one whose
+        // map is gone - the game stopped there, "Data structure with index does not exist" in scr_inv_atr, picking up an
+        // arrow (#72) - is taken away instead, before the pickup reaches it.
+        context.OnCode("gml_Object_o_floor_target_Other_10", before: (target, _) =>
+        {
+            DropBroken(target);
+            return false;
+        });
+    }
+
+    // The loot a pickup will copy (its loot_target, or any on the ground) whose item data map no longer exists: removed.
+    private void DropBroken(Instance target)
+    {
+        Instance chosen = target.Exists ? Instance.Of(target.Get("loot_target")) : default;
+        IEnumerable<Instance> loot = !chosen.IsNone && chosen.Exists
+            ? new[] { chosen }
+            : GroundItems.All(includeCulled: false).Select(item => item.Instance);
+        foreach (Instance item in loot.ToList())
+        {
+            // (Not a coin - never picked up this way - nor a plant: the game gives the inventory's own data to those.)
+            int obj = item.Get("object_index").AsInt;
+            if (!item.Exists || obj == (int)GameObjectId.o_coin || Gm.ObjectIsAncestor(obj, (int)GameObjectId.o_abstractGrow))
+                continue;
+            GmValue data = item.Get("data");
+            if (!data.IsUndefined && Game.CallBuiltin("ds_exists", data, 1).AsBool)
+                continue;
+            _context.Log($"{Gm.ObjectGetName(obj)} on the ground had no item data: removed rather than picked up");
+            Destroy(item);
+        }
     }
 
     public void Clear()

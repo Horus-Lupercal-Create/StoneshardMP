@@ -9,6 +9,11 @@ releases them: the release workflow titles that section with the version, sets i
   `c_TraidingSpot`, #69), when another player entered the village. 0.5.0's guard looked for the stall's trader by
   instance, but rooms name it by object, so it never found one and let the step go ahead. It now finds the trader the
   way the game does.
+- **Fixed: most of a dead client's things were lost** (#74). Everything a player drops on death reached the area's
+  owner at once, and all but 10 were turned away as "more than 10 a second", a limit against runaway loops. It's now
+  300 a second, enough for a full inventory.
+- **Fixed: a crash picking up an arrow** ("Data structure with index does not exist", in `scr_inv_atr`, #72). An item on
+  the ground whose item data was gone is now removed when a pickup reaches it instead of stopping the game, and logged.
 
 ## 0.5.2
 
