@@ -22,6 +22,10 @@ releases them: the release workflow titles that section with the version, sets i
   showing a region, the land you walk) charts it on everyone's world map, and when someone joins, each player's
   charted map is put together, as explored land already was. Before, only the host's charting reached anyone, and only
   after loading again. Protocol 47, so every player needs this version.
+- **Changed: one bad part of the caravan's data no longer stops the rest being taken** (#73). A client sometimes
+  failed to take the host's caravan state ("Packet receive failed", an SEHException in `DsMap.AssignFrom`), which left
+  its caravan behind the host's. It's now taken a part at a time: a part that fails is logged by name ("Caravan data:
+  … couldn't be taken") and skipped, and everything else still arrives.
 
 ## 0.5.2
 

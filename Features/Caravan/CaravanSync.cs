@@ -41,6 +41,8 @@ public sealed class CaravanSync
     private int _stashHolder = -1;
     private bool _inStash;
     private int _frame;
+    // The caravan keys that have failed to be taken (each said once).
+    private readonly System.Collections.Generic.HashSet<string> _failedKeys = new();
 
     public CaravanSync(ModContext context, Session session, Func<bool> inSharedWorld)
     {
@@ -167,8 +169,8 @@ public sealed class CaravanSync
         {
             if (Caravan() is not { } caravan || DsMap.FromJson(json) is not { } given)
                 return;
-            caravan.AssignFrom(given);
-            given.Destroy();
+            try { Merge(caravan, given, "caravanDataMap"); }
+            finally { given.Destroy(); }
             _state = caravan.ToJson();
         }
         // (The host: what a client changed goes on to the others at its next look, now that it's ours.)
@@ -178,6 +180,54 @@ public sealed class CaravanSync
                 _stash = "";
             else
                 _state = "";
+        }
+    }
+
+    // The given caravan state taken into ours in place, as DsMap.AssignFrom does - a key at a time, nested maps followed
+    // down, so one that fails (the game stopped reading a map deep in it - "Packet receive failed", an SEHException in
+    // AssignFrom, #73) is said by where it is and skipped, and the rest is still taken.
+    private void Merge(DsMap mine, DsMap given, string path)
+    {
+        foreach (GmValue key in mine.Keys)
+            if (!given.Has(key))
+                Try(path, key, () => mine.Remove(key));
+        foreach (GmValue key in given.Keys)
+            Try(path, key, () =>
+            {
+                if (given.GetMap(key) is { } map)
+                {
+                    if (mine.GetMap(key) is { } nested)
+                        Merge(nested, map, $"{path}.{key}");
+                    else
+                    {
+                        DsMap made = DsMap.Create();
+                        made.AssignFrom(map);
+                        mine.AddMap(key, made);
+                    }
+                }
+                else if (given.GetList(key) is { } list)
+                {
+                    if (mine.GetList(key) is { } nested)
+                        nested.AssignFrom(list);
+                    else
+                    {
+                        DsList made = DsList.Create();
+                        made.AssignFrom(list);
+                        mine.AddList(key, made);
+                    }
+                }
+                else
+                    mine[key] = given[key];
+            });
+    }
+
+    private void Try(string path, GmValue key, Action action)
+    {
+        try { action(); }
+        catch (Exception e) when (e is System.Runtime.InteropServices.SEHException or InvalidOperationException)
+        {
+            if (_failedKeys.Add($"{path}.{key}"))
+                _context.Log($"Caravan data: {path}.{key} couldn't be taken ({e.GetType().Name}: {e.Message}) - skipped");
         }
     }
 
