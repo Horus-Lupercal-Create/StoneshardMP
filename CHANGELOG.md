@@ -18,6 +18,10 @@ releases them: the release workflow titles that section with the version, sets i
   client counts as fighting that client's stand-in in the area owner's game, which the game only counts as combat near
   the owner's own character, so the rounds ended after the first turn. The owner now counts any unit going for a
   player's stand-in as that player being in combat.
+- **Maps read by any player are shared** (#77, #62). Reading a map (or anything else that charts the world map: a quest
+  showing a region, the land you walk) charts it on everyone's world map, and when someone joins, each player's
+  charted map is put together, as explored land already was. Before, only the host's charting reached anyone, and only
+  after loading again. Protocol 47, so every player needs this version.
 
 ## 0.5.2
 

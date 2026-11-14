@@ -6,6 +6,8 @@ using StoneshardMP.Net;
 
 // A world-map tile uncovered (scr_globalmapFogUpdate: the tile entered, and the fog around it).
 [assembly: HookScript(nameof(Scripts.scr_globalmapFogUpdate))]
+// Tiles put on the paper map (scr_globalmapPaperUpdateArray: a map read, a region, the tiles walked - every way comes here).
+[assembly: HookScript(nameof(Scripts.scr_globalmapPaperUpdateArray))]
 
 namespace StoneshardMP.Features.World;
 
@@ -14,6 +16,9 @@ namespace StoneshardMP.Features.World;
 // points of interest - no discovery XP: that's scr_glmap_openLocation's, shared on its own as the tile's isOpen). And
 // whenever someone comes into the world, each game sends all it has uncovered, so what each player explored before
 // they played together is put together too (#46).
+// The paper map the same way (global.globalmapPaperGrid: what the world map draws as charted - a map read, a region a
+// quest shows, the land walked): a client reading a map charted it for itself only, and the host had to read one to
+// share it, then load again (#77, #62).
 public sealed class MapFogSync
 {
     // (Who's in the world looked at this often - and what we've just uncovered sent at most this often.)
@@ -22,6 +27,7 @@ public sealed class MapFogSync
     private readonly Session _session;
     private readonly Func<bool> _inSharedWorld;
     private readonly List<ushort> _uncovered = new();
+    private readonly List<ushort> _charted = new();
     private string _present = "";
     private int _frame;
     // (Uncovering what another sent: not sent back.)
@@ -43,6 +49,20 @@ public sealed class MapFogSync
             }
             return false;
         });
+        Scripts.scr_globalmapPaperUpdateArray.Before(context, call =>
+        {
+            if (_applying || !Ready || call.Args.Length < 1 || call.Args[0].AsArray is not { } tiles)
+                return false;
+            using (tiles)
+                for (int i = 0; i + 1 < tiles.Length; i += 2)
+                    if (tiles[i].Kind == GmKind.Real && tiles[i + 1].Kind == GmKind.Real
+                        && Paper(tiles[i].AsInt, tiles[i + 1].AsInt) == 0)
+                    {
+                        _charted.Add((ushort)tiles[i].AsInt);
+                        _charted.Add((ushort)tiles[i + 1].AsInt);
+                    }
+            return false;
+        });
     }
 
     private bool Ready => _session.Connected && _inSharedWorld() && Gm.InGame && Gm.InstanceExists(GameObjectId.o_player);
@@ -50,6 +70,7 @@ public sealed class MapFogSync
     public void Clear()
     {
         _uncovered.Clear();
+        _charted.Clear();
         _present = "";
     }
 
@@ -60,6 +81,7 @@ public sealed class MapFogSync
         if (!Ready)
         {
             _uncovered.Clear();
+            _charted.Clear();
             return;
         }
         // (Someone's come into the world: all of ours, for them.)
@@ -68,8 +90,11 @@ public sealed class MapFogSync
         {
             _present = present;
             _uncovered.Clear();
-            if (present.Length > 0 && All() is { Length: > 0 } all)
+            _charted.Clear();
+            if (present.Length > 0 && All("scr_globalmapFogSave", "globalmapFogString") is { Length: > 0 } all)
                 _session.Send(new MapFogPacket(all));
+            if (present.Length > 0 && All("scr_globalmapPaperSave", "globalmapPaperString") is { Length: > 0 } paper)
+                _session.Send(new MapFogPacket(paper, Paper: true));
             return;
         }
         if (_uncovered.Count > 0)
@@ -78,12 +103,23 @@ public sealed class MapFogSync
                 _session.Send(new MapFogPacket(_uncovered.ToArray()));
             _uncovered.Clear();
         }
+        if (_charted.Count > 0)
+        {
+            if (present.Length > 0)
+                _session.Send(new MapFogPacket(_charted.ToArray(), Paper: true));
+            _charted.Clear();
+        }
     }
 
     private void Receive(RemotePlayer from, MapFogPacket packet)
     {
         if (!Ready)
             return;
+        if (packet.Paper)
+        {
+            Chart(from, packet.Cells);
+            return;
+        }
         int uncovered = 0;
         _applying = true;
         try
@@ -102,18 +138,44 @@ public sealed class MapFogSync
             _context.Log($"{from.Name}'s world map: {uncovered} tile(s) uncovered here");
     }
 
+    // Another's paper map put on ours: the tiles we haven't charted, by the game's own call, in one go (it redraws the
+    // map once).
+    private void Chart(RemotePlayer from, ushort[] cells)
+    {
+        var tiles = new List<GmValue>();
+        for (int i = 0; i + 1 < cells.Length; i += 2)
+            if (Paper(cells[i], cells[i + 1]) == 0)
+            {
+                tiles.Add(cells[i]);
+                tiles.Add(cells[i + 1]);
+            }
+        if (tiles.Count == 0)
+            return;
+        _applying = true;
+        try
+        {
+            using GmArray array = GmArray.From(tiles.ToArray());
+            Game.CallScript("scr_globalmapPaperUpdateArray", default, array, true);
+        }
+        finally { _applying = false; }
+        _context.Log($"{from.Name}'s paper map: {tiles.Count / 2} tile(s) charted here");
+    }
+
     // A tile's fog: 0 covered, 1 uncovered (-4: no world map).
     private static double Fog(int x, int y) => Game.CallScript("scr_globalmapFogGet", default, x, y).AsReal;
 
-    // Every tile we've uncovered: the game's own saved form of the grid (scr_globalmapFogSave: a digit a tile, column by
-    // column), read in one call.
-    private static ushort[] All()
+    // A tile on the paper map: 0 not charted, 1 charted.
+    private static double Paper(int x, int y) => Game.CallScript("scr_globalmapPaperGet", default, x, y).AsReal;
+
+    // Every tile we've uncovered (or charted): the game's own saved form of the grid (scr_globalmapFogSave,
+    // scr_globalmapPaperSave: a digit a tile, column by column), read in one call.
+    private static ushort[] All(string save, string saved)
     {
         int width = Game.Global["worldWidth"].AsInt, height = Game.Global["worldHeight"].AsInt;
         if (width <= 0 || height <= 0)
             return Array.Empty<ushort>();
-        Game.CallScript("scr_globalmapFogSave", default);
-        string fog = Game.Global["globalmapFogString"].AsString;
+        Game.CallScript(save, default);
+        string fog = Game.Global[saved].AsString;
         var cells = new List<ushort>();
         for (int i = 0; i < fog.Length && i < width * height; i++)
             if (fog[i] == '1')

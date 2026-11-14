@@ -3,9 +3,10 @@ using StoneshardMP.Net.Packets;
 
 namespace StoneshardMP.Features.World;
 
-/// <summary>To everyone: world-map tiles the sender has uncovered (global.globalmapFogGrid), as x, y pairs - those just
-/// uncovered, or all of them when someone comes into the world. Each game uncovers those it hasn't.</summary>
-public readonly record struct MapFogPacket(ushort[] Cells) : IPacket
+/// <summary>To everyone: world-map tiles the sender has uncovered (global.globalmapFogGrid) - or, with
+/// <paramref name="Paper"/>, has on its paper map (global.globalmapPaperGrid: read from a map, or walked) - as x, y pairs:
+/// those just uncovered, or all of them when someone comes into the world. Each game uncovers those it hasn't.</summary>
+public readonly record struct MapFogPacket(ushort[] Cells, bool Paper = false) : IPacket
 {
     public const byte PacketId = 73;
 
@@ -13,6 +14,7 @@ public readonly record struct MapFogPacket(ushort[] Cells) : IPacket
 
     public void Write(ref SpanReadWrite writer)
     {
+        writer.Write((byte)(Paper ? 1 : 0));
         writer.Write(Cells.Length);
         foreach (ushort cell in Cells)
             writer.Write(cell);
@@ -20,10 +22,11 @@ public readonly record struct MapFogPacket(ushort[] Cells) : IPacket
 
     public static MapFogPacket Read(ref SpanReadWrite reader)
     {
+        bool paper = reader.Read<byte>() != 0;
         int count = reader.Read<int>();
         var cells = new ushort[count];
         for (int i = 0; i < count; i++)
             cells[i] = reader.Read<ushort>();
-        return new MapFogPacket(cells);
+        return new MapFogPacket(cells, paper);
     }
 }
