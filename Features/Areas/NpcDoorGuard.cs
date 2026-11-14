@@ -61,10 +61,12 @@ public sealed class NpcDoorGuard
         context.OnCode("gml_Object_c_TraidingSpot_Step_0", before: (stall, _) => !TraderHasDoors(stall));
     }
 
-    // Whether the stall's trader (myNpc) is gone or has the second door its step reads (target_array[1]).
+    // Whether the stall's trader (myNpc) is gone or has the second door its step reads (target_array[1]). Rooms give a
+    // stall its trader as an object (myNpc = 578), not an instance - the step reads its first instance's doors - so it's
+    // found as Handles.Owner does: read as an instance id, it was never there, and the stall still stopped the game (#69).
     private bool TraderHasDoors(Instance stall)
     {
-        Instance npc = Instance.Of(stall.Get("myNpc"));
+        Instance npc = Combat.Handles.Owner(stall.Get("myNpc"));
         if (npc.IsNone || !npc.Exists)
             return true;
         using GmArray? doors = npc.Get("target_array").AsArray;

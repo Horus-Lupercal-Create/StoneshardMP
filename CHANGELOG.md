@@ -3,6 +3,13 @@
 Changes go under **## Unreleased** as they're made. Pushing a version tag (`git tag v0.2.0`, `git push origin v0.2.0`)
 releases them: the release workflow titles that section with the version, sets it in mod.json and publishes the zip.
 
+## Unreleased
+
+- **Fixed: the game could still stop at a trader's stall** ("Variable Index [1] out of range [0]", in
+  `c_TraidingSpot`, #69), when another player entered the village. 0.5.0's guard looked for the stall's trader by
+  instance, but rooms name it by object, so it never found one and let the step go ahead. It now finds the trader the
+  way the game does.
+
 ## 0.5.2
 
 - **Fixed: players couldn't join a long game's world** ("Packet too large", #68). A save over 1 MB once compressed
