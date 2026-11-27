@@ -3,6 +3,13 @@
 Changes go under **## Unreleased** as they're made. Pushing a version tag (`git tag v0.2.0`, `git push origin v0.2.0`)
 releases them: the release workflow titles that section with the version, sets it in mod.json and publishes the zip.
 
+## Unreleased
+
+- **Fixed: "Packet receive failed" (an SEHException in `MapFogSync.Chart`) for a client joining the host's world.**
+  The host's paper map reached the client before the client's own paper map was made, and the game's
+  `scr_globalmapPaperUpdateArray` threw. The tiles are now kept until the client's paper map exists
+  (`scr_globalmapPaperExists`), then charted; a failure there is logged instead of dropping the packet.
+
 ## 0.6.0
 
 - **Fixed: the game could still stop at a trader's stall** ("Variable Index [1] out of range [0]", in

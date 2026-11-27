@@ -28,6 +28,9 @@ public sealed class MapFogSync
     private readonly Func<bool> _inSharedWorld;
     private readonly List<ushort> _uncovered = new();
     private readonly List<ushort> _charted = new();
+    // (Another's paper map that came before ours was made: put on it once it is.)
+    private readonly List<ushort> _pendingPaper = new();
+    private RemotePlayer? _pendingFrom;
     private string _present = "";
     private int _frame;
     // (Uncovering what another sent: not sent back.)
@@ -71,6 +74,8 @@ public sealed class MapFogSync
     {
         _uncovered.Clear();
         _charted.Clear();
+        _pendingPaper.Clear();
+        _pendingFrom = null;
         _present = "";
     }
 
@@ -82,7 +87,14 @@ public sealed class MapFogSync
         {
             _uncovered.Clear();
             _charted.Clear();
+            _pendingPaper.Clear();
             return;
+        }
+        if (_pendingPaper.Count > 0 && _pendingFrom != null && PaperReady())
+        {
+            ushort[] pending = _pendingPaper.ToArray();
+            _pendingPaper.Clear();
+            Chart(_pendingFrom, pending);
         }
         // (Someone's come into the world: all of ours, for them.)
         string present = string.Join(",", _session.Players.Where(p => p.State != null).Select(p => p.Slot).OrderBy(s => s));
@@ -151,14 +163,39 @@ public sealed class MapFogSync
             }
         if (tiles.Count == 0)
             return;
+        // (Our paper map isn't made yet - just joined, the world map not drawn once: kept, and put on it once it is.)
+        if (!PaperReady())
+        {
+            _pendingFrom = from;
+            _pendingPaper.AddRange(cells);
+            return;
+        }
         _applying = true;
         try
         {
             using GmArray array = GmArray.From(tiles.ToArray());
             Game.CallScript("scr_globalmapPaperUpdateArray", default, array, true);
         }
+        // (The game's script stopping on the tiles - an SEHException - mustn't drop the packet's handling with it.)
+        catch (Exception e) when (e is System.Runtime.InteropServices.SEHException or InvalidOperationException)
+        {
+            _context.Log($"{from.Name}'s paper map: {tiles.Count / 2} tile(s) couldn't be charted here ({e.GetType().Name})");
+            return;
+        }
         finally { _applying = false; }
         _context.Log($"{from.Name}'s paper map: {tiles.Count / 2} tile(s) charted here");
+    }
+
+    private static bool PaperReady()
+    {
+        try
+        {
+            return Game.CallScript("scr_globalmapPaperExists", default).AsBool;
+        }
+        catch (System.Runtime.InteropServices.SEHException)
+        {
+            return false;
+        }
     }
 
     // A tile's fog: 0 covered, 1 uncovered (-4: no world map).
